@@ -1,5 +1,5 @@
 python3 -m EasyLM.models.gemma.gemma_train \
-    --load_checkpoint= \
+    --load_checkpoint=safetensor::gemma-34/model.safetensor \
     --mesh_dim=2,2 \
     --dtype=bf16 \
     --total_steps=320000 \
