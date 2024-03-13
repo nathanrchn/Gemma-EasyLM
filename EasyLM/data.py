@@ -65,7 +65,7 @@ class ChatProcessor(object):
             {"role": "assistant", "content": response}
         ]
 
-        return self.tokenizer.apply_chat_template(conversation, truncation=True, max_length=2048, padding="max_length")
+        return (self.tokenizer.apply_chat_template(conversation, truncation=True, max_length=2048, padding="max_length"), np.ones(2048, dtype=np.float32))
 
 
 class TextProcessor(object):

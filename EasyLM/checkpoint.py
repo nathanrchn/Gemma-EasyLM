@@ -8,6 +8,7 @@ import flax
 from flax.serialization import from_bytes, to_bytes, to_state_dict, from_state_dict
 from flax.traverse_util import flatten_dict, unflatten_dict, empty_node
 import msgpack
+import safetensors
 
 from EasyLM.jax_utils import tree_apply, float_tensor_to_dtype
 
@@ -145,6 +146,13 @@ class StreamingCheckpointer(object):
         if target is None:
             return state_dict
         return from_state_dict(target, state_dict)
+    
+    @staticmethod
+    def load_safetensor_checkpoint(path, target=None, shard_fns=None):
+        if shard_fns is not None:
+            print("Warning: shard_fns is not supported for safetensors")
+        params = safetensors.safe_open(path, framework="flax")
+        return params
 
     @classmethod
     def load_trainstate_checkpoint(
@@ -207,6 +215,12 @@ class StreamingCheckpointer(object):
             # restored_params = flax.core.frozen_dict.freeze(
             #     {'params': restored_params}
             # )
+            restored_params = {"params": restored_params}
+        elif load_type == "safetensor":
+            restored_params = cls.load_safetensor_checkpoint(
+                path=load_path, target=params_target, shard_fns=params_shard_fns
+            )
+
             restored_params = {"params": restored_params}
         else:
             raise ValueError(f"Invalid load_from type: {load_type}")

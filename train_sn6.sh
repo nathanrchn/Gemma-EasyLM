@@ -1,0 +1,24 @@
+python3 -m EasyLM.models.gemma.gemma_train \
+    --load_checkpoint= \
+    --mesh_dim=2,2 \
+    --dtype=bf16 \
+    --total_steps=320000 \
+    --log_freq=128 \
+    --save_model_freq=999320000 \
+    --save_milestone_freq=10000 \
+    --train_dataset.type="huggingface" \
+    --train_dataset.text_processor.fields="text" \
+    --train_dataset.json_dataset.seq_length=8192 \
+    --train_dataset.json_dataset.batch_size=8 \
+    --train_dataset.json_dataset.path=gs://kodataset/kor_falcon_hq/falcon_korean_stage_012_concat.jsonl \
+    --optimizer.accumulate_gradient_steps=64 \
+    --optimizer.type=adamw \
+    --optimizer.adamw_optimizer.weight_decay=0.1 \
+    --optimizer.adamw_optimizer.lr=0.00005 \
+    --optimizer.adamw_optimizer.end_lr=0.000001 \
+    --optimizer.adamw_optimizer.lr_warmup_steps=10000 \
+    --optimizer.adamw_optimizer.lr_decay_steps=320000 \
+    --checkpointer.save_optimizer_state=True \
+    --checkpointer.float_dtype=bf16 \
+    --logger.online=True \
+    --logger.output_dir=gs://kodataset/gemma-checkpoint
