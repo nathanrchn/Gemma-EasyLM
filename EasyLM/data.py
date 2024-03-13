@@ -34,7 +34,8 @@ class DatasetFactory(object):
     @classmethod
     def load_dataset(cls, config, tokenizer, **kwargs):
         config = cls.get_default_config(config)
-        text_processor = TextProcessor(config.text_processor, tokenizer)
+        # text_processor = TextProcessor(config.text_processor, tokenizer)
+        text_processor = ChatProcessor(tokenizer)
         if config.type == 'huggingface':
             return HuggingfaceDataset(
                 config.huggingface_dataset, tokenizer, text_processor, **kwargs
@@ -46,6 +47,25 @@ class DatasetFactory(object):
 
     def __init__(self):
         raise ValueError('DatasetFactory is a static class and should not be instantiated.')
+
+
+class ChatProcessor(object):
+    def __init__(self, tokenizer) -> None:
+        self.tokenizer = tokenizer
+
+    def __call__(self, example, has_aux=False):
+        if has_aux:
+            raise NotImplementedError
+        
+        prompt = example["prompt"]
+        response = example["response"]
+
+        conversation = [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response}
+        ]
+
+        return self.tokenizer.apply_chat_template(conversation, truncation=True, max_length=2048, padding="max_length")
 
 
 class TextProcessor(object):

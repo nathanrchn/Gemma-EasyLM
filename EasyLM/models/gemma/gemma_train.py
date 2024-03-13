@@ -6,8 +6,8 @@ import numpy as np
 import mlxu
 
 import jax
-import jax.numpy as jnp
-from jax.experimental.pjit import pjit
+from jax import jit, numpy as jnp
+# from jax.experimental.pjit import pjit # deprecated
 from jax.sharding import PartitionSpec as PS
 from flax.training.train_state import TrainState
 
@@ -69,7 +69,7 @@ def main(argv):
     set_random_seed(FLAGS.seed)
 
     # tokenizer = GemmaConfig.get_tokenizer(FLAGS.tokenizer)
-    tokenizer = AutoTokenizer.from_pretrained("google/gemma-7b")
+    tokenizer = AutoTokenizer.from_pretrained("tomaszki/gemma-34")
     dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
     if FLAGS.load_dataset_state != "":
         dataset.load_state_dict(mlxu.load_pickle(FLAGS.load_dataset_state))
@@ -86,7 +86,7 @@ def main(argv):
     #     gemma_config = GemmaConfig.load_config(FLAGS.load_gemma_config)
     # else:
     #     gemma_config = GemmaConfig(**FLAGS.gemma)
-    gemma_config = GemmaConfig.from_pretrained("google/gemma-7b")
+    gemma_config = GemmaConfig.from_pretrained("tomaszki/gemma-34")
 
     # if FLAGS.update_gemma_config != "":
     #     gemma_config.update(dict(eval(FLAGS.update_gemma_config)))
@@ -182,25 +182,25 @@ def main(argv):
         enable=jax.process_index() == 0,
     )
 
-    sharded_init_fn = pjit(
+    sharded_init_fn = jit(
         init_fn, in_shardings=PS(), out_shardings=train_state_partition
     )
 
-    sharded_create_trainstate_from_params = pjit(
+    sharded_create_trainstate_from_params = jit(
         create_trainstate_from_params,
         in_shardings=(train_state_partition.params,),
         out_shardings=train_state_partition,
         donate_argnums=(0,),
     )
 
-    sharded_train_step = pjit(
+    sharded_train_step = jit(
         train_step,
         in_shardings=(train_state_partition, PS(), PS()),
         out_shardings=(train_state_partition, PS(), PS()),
         donate_argnums=(0, 1),
     )
 
-    sharded_eval_step = pjit(
+    sharded_eval_step = jit(
         eval_step,
         in_shardings=(train_state_partition, PS(), PS()),
         out_shardings=(PS(), PS()),
