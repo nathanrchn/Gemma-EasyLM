@@ -6,8 +6,8 @@ import numpy as np
 import mlxu
 
 import jax
-from jax import jit, numpy as jnp
-# from jax.experimental.pjit import pjit # deprecated
+from jax import numpy as jnp
+from jax.experimental.pjit import pjit as jit # deprecated # fixme
 from jax.sharding import PartitionSpec as PS
 from flax.training.train_state import TrainState
 
@@ -32,6 +32,7 @@ from EasyLM.models.gemma.gemma_model import FlaxGemmaForCausalLMModule
 from EasyLM.models.gemma.configuration_gemma import GemmaConfig
 
 from transformers import AutoTokenizer
+from flax.traverse_util import flatten_dict
 
 FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     seed=42,
@@ -69,7 +70,7 @@ def main(argv):
     set_random_seed(FLAGS.seed)
 
     # tokenizer = GemmaConfig.get_tokenizer(FLAGS.tokenizer)
-    tokenizer = AutoTokenizer.from_pretrained("tomaszki/gemma-34")
+    tokenizer = AutoTokenizer.from_pretrained("silvainrichou/gemma-2b-012")
     dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
     if FLAGS.load_dataset_state != "":
         dataset.load_state_dict(mlxu.load_pickle(FLAGS.load_dataset_state))
@@ -86,7 +87,7 @@ def main(argv):
     #     gemma_config = GemmaConfig.load_config(FLAGS.load_gemma_config)
     # else:
     #     gemma_config = GemmaConfig(**FLAGS.gemma)
-    gemma_config = GemmaConfig.from_pretrained("tomaszki/gemma-34")
+    gemma_config = GemmaConfig.from_pretrained("silvainrichou/gemma-2b-012")
 
     # if FLAGS.update_gemma_config != "":
     #     gemma_config.update(dict(eval(FLAGS.update_gemma_config)))
@@ -115,9 +116,9 @@ def main(argv):
     def init_fn(rng):
         rng_generator = JaxRNG(rng)
         params = model.init(
-            input_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
-            position_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
-            attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
+            input_ids=jnp.zeros((2, seq_length), dtype=jnp.int32),
+            position_ids=jnp.zeros((2, seq_length), dtype=jnp.int32),
+            attention_mask=jnp.ones((2, seq_length), dtype=jnp.int32),
             rngs=rng_generator(gemma_config.rng_keys()),
         )
         return TrainState.create(params=params, tx=optimizer, apply_fn=None)
@@ -168,7 +169,9 @@ def main(argv):
         return rng_generator(), metrics
 
     train_state_shapes = jax.eval_shape(init_fn, next_rng())
-    # print("train_state_shapes:", train_state_shapes)
+    # print("train_state_shapes:")
+    # for k, v in flatten_dict(train_state_shapes.params).items():
+    #     print(k, v)
     train_state_partition = match_partition_rules(
         GemmaConfig.get_partition_rules(), train_state_shapes
     )
@@ -207,9 +210,10 @@ def main(argv):
         donate_argnums=(1,),
     )
 
-    def save_checkpoint(train_state, milestone=False):
+    def save_checkpoint(train_state, loss, milestone=False):
         step = int(jax.device_get(train_state.step))
         metadata = dict(
+            loss=loss,
             step=step,
             variant=variant,
             flags=flags_config_dict,
@@ -241,6 +245,9 @@ def main(argv):
             train_state = sharded_create_trainstate_from_params(restored_params)
             del restored_params
 
+        # for k, v in flatten_dict(train_state.params).items():
+        #     print(k, v.dtype)
+
         start_step = int(jax.device_get(train_state.step))
         print("Start training from step", start_step)
 
@@ -249,6 +256,8 @@ def main(argv):
         #     save_checkpoint(train_state)
 
         sharded_rng = next_rng()
+
+        best_loss = np.inf
 
         step_counter = trange(start_step, FLAGS.total_steps, ncols=0)
 
@@ -275,16 +284,20 @@ def main(argv):
                 logger.log(log_metrics)
                 tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
 
-            if (
-                FLAGS.save_milestone_freq > 0
-                and (step + 1) % FLAGS.save_milestone_freq == 0
-            ):
-                save_checkpoint(train_state, milestone=True)
-            elif FLAGS.save_model_freq > 0 and (step + 1) % FLAGS.save_model_freq == 0:
-                save_checkpoint(train_state)
+                if metrics["loss"] < best_loss:
+                    best_loss = metrics["loss"]
+                    save_checkpoint(train_state, metrics["loss"], milestone=True)
 
-        if FLAGS.save_model_freq > 0:
-            save_checkpoint(train_state)
+            # if (
+            #     FLAGS.save_milestone_freq > 0
+            #     and (step + 1) % FLAGS.save_milestone_freq == 0
+            # ):
+            #     save_checkpoint(train_state, milestone=True)
+            # elif FLAGS.save_model_freq > 0 and (step + 1) % FLAGS.save_model_freq == 0:
+            #     save_checkpoint(train_state)
+
+        # if FLAGS.save_model_freq > 0:
+        #     save_checkpoint(train_state)
 
 
 if __name__ == "__main__":

@@ -56,7 +56,7 @@ class ChatProcessor(object):
     def __call__(self, example, has_aux=False):
         if has_aux:
             raise NotImplementedError
-        
+
         prompt = example["prompt"]
         response = example["response"]
 
@@ -65,8 +65,9 @@ class ChatProcessor(object):
             {"role": "assistant", "content": response}
         ]
 
-        return (self.tokenizer.apply_chat_template(conversation, truncation=True, max_length=2048, padding="max_length"), np.ones(2048, dtype=np.float32))
+        tokens = self.tokenizer.apply_chat_template(conversation, truncation=True, max_length=2048, padding="max_length")
 
+        return (tokens, np.array(tokens) != 0)
 
 class TextProcessor(object):
     """ Example processor that converts a dictionary of texts into tokens. """
@@ -163,12 +164,12 @@ class HuggingfaceDataset(object):
     @staticmethod
     def get_default_config(updates=None):
         config = ConfigDict()
-        config.path = 'c4'
-        config.name = 'en'
-        config.split = 'train'
+        config.path = "silvainrichou/cortex.t_filtered"
+        config.name = "default"
+        config.split = "train"
         config.streaming = False
-        config.seq_length = 1024
-        config.batch_size = 8
+        config.seq_length = 2048
+        config.batch_size = 2 # do it with 4
         config.always_start_with_bos = False
         config.batch_token_dtype = 'i4'
 

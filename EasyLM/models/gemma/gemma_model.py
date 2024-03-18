@@ -205,7 +205,7 @@ class FlaxGemmaRMSNorm(nn.Module):
     def setup(self):
         self.epsilon = self.config.rms_norm_eps
         self.weight = self.param(
-            "weight", lambda _, shape: jnp.ones(shape), self.config.hidden_size
+            "weight", lambda _, shape: jnp.ones(shape, dtype=jnp.bfloat16), self.config.hidden_size
         )
 
     def __call__(self, hidden_states):
@@ -285,25 +285,25 @@ class FlaxGemmaAttention(nn.Module):
         self.q_proj = nn.Dense(
             self.num_heads * self.head_dim,
             use_bias=config.attention_bias,
-            dtype=self.dtype,
+            param_dtype=self.dtype,
             kernel_init=kernel,
         )
         self.k_proj = nn.Dense(
             self.num_key_value_heads * self.head_dim,
             use_bias=config.attention_bias,
-            dtype=self.dtype,
+            param_dtype=self.dtype,
             kernel_init=kernel,
         )
         self.v_proj = nn.Dense(
             self.num_key_value_heads * self.head_dim,
             use_bias=config.attention_bias,
-            dtype=self.dtype,
+            param_dtype=self.dtype,
             kernel_init=kernel,
         )
         self.o_proj = nn.Dense(
             self.embed_dim,
             use_bias=config.attention_bias,
-            dtype=self.dtype,
+            param_dtype=self.dtype,
             kernel_init=kernel,
         )
 
@@ -377,31 +377,20 @@ class FlaxGemmaAttention(nn.Module):
         output_attentions: bool = False,
         freq_cis=None,
     ):
-        # print("hidden_states", hidden_states.shape)
 
         query = self.q_proj(hidden_states)
         key = self.k_proj(hidden_states)
         value = self.v_proj(hidden_states)
-        # print("query", query.shape)
-        # print("key", key.shape)
-        # print("value", value.shape)
         query = with_sharding_constraint(query, PS(("dp", "fsdp"), None, "mp"))
         key = with_sharding_constraint(key, PS(("dp", "fsdp"), None, "mp"))
         value = with_sharding_constraint(value, PS(("dp", "fsdp"), None, "mp"))
 
-        # print("Apply split heads")
         query = self._split_heads(query, self.num_heads)
         key = self._split_heads(key, self.num_key_value_heads)
         value = self._split_heads(value, self.num_key_value_heads)
-        # print("query", query.shape)
-        # print("key", key.shape)
-        # print("value", value.shape)
 
         # key, query = self.rotary_emb(key, query, position_ids)
         key, query = self.rotary_emb(freq_cis, key, query, position_ids)
-        # print("Apply rotary emb")
-        # print("query", query.shape)
-        # print("key", key.shape)
 
         # freqs_cis = jnp.take(self.freqs_cis, position_ids, axis=0)
         # query, key = apply_rotary_emb(query, key, freqs_cis=freqs_cis, dtype=self.dtype)
@@ -503,13 +492,13 @@ class FlaxGemmaMLP(nn.Module):
         self.act = ACT2FN[self.config.hidden_act]
 
         self.gate_proj = nn.Dense(
-            inner_dim, use_bias=False, dtype=self.dtype, kernel_init=kernel_init
+            inner_dim, use_bias=False, param_dtype=self.dtype, kernel_init=kernel_init
         )
         self.down_proj = nn.Dense(
-            embed_dim, use_bias=False, dtype=self.dtype, kernel_init=kernel_init
+            embed_dim, use_bias=False, param_dtype=self.dtype, kernel_init=kernel_init
         )
         self.up_proj = nn.Dense(
-            inner_dim, use_bias=False, dtype=self.dtype, kernel_init=kernel_init
+            inner_dim, use_bias=False, param_dtype=self.dtype, kernel_init=kernel_init
         )
 
     def __call__(self, hidden_states):
@@ -688,9 +677,9 @@ class FlaxGemmaPreTrainedModel(FlaxPreTrainedModel):
                     "Make sure to provide `position_ids` when passing `past_key_values`."
                 )
 
-            position_ids = jnp.broadcast_to(
-                jnp.arange(sequence_length)[None, :], (batch_size, sequence_length)
-            )
+            # position_ids = jnp.broadcast_to(
+            #     jnp.arange(sequence_length)[None, :], (batch_size, sequence_length)
+            # )
 
         if attention_mask is None:
             print("attention_mask is None, setting to ones")
@@ -799,7 +788,7 @@ class FlaxGemmaModule(nn.Module):
             self.config.vocab_size,
             self.hidden_size,
             embedding_init=embedding_init,
-            dtype=self.dtype,
+            param_dtype=self.dtype,
         )
         self.layers = FlaxGemmaLayerCollection(self.config, dtype=self.dtype)
         self.norm = FlaxGemmaRMSNorm(self.config, dtype=self.dtype)
@@ -883,7 +872,7 @@ class FlaxGemmaForCausalLMModule(nn.Module):
         self.lm_head = nn.Dense(
             self.config.vocab_size,
             use_bias=False,
-            dtype=self.dtype,
+            param_dtype=self.dtype,
             kernel_init=jax.nn.initializers.normal(
                 stddev=self.config.initializer_range
             ),
@@ -901,6 +890,11 @@ class FlaxGemmaForCausalLMModule(nn.Module):
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
+        if position_ids is None:
+            pad_mask = input_ids != 0 # pad_id
+            positions = jnp.cumsum(pad_mask, axis=-1)
+            position_ids = positions - (positions >= 1)
+
         outputs = self.model(
             input_ids,
             position_ids=position_ids,

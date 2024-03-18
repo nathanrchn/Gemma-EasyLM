@@ -33,15 +33,21 @@ class StreamingCheckpointer(object):
         self.config = self.get_default_config(config)
         self.checkpoint_dir = checkpoint_dir
         self.enable = enable
+        self.previous_path = None
 
     def save_checkpoint(self, train_state, filename, gather_fns=None):
         if self.enable:
             path = os.path.join(self.checkpoint_dir, filename)
         else:
             path = "/dev/null"
+        
+        if self.previous_path:
+            os.remove(self.previous_path)
+
         self.save_train_state_to_file(
             train_state, path, gather_fns, self.config.float_dtype
         )
+        self.previous_path = path
 
     @staticmethod
     def save_train_state_to_file(train_state, path, gather_fns=None, float_dtype=None):
@@ -80,18 +86,18 @@ class StreamingCheckpointer(object):
 
         if milestone:
             # Save a milestone checkpoint that will not be overwritten
-            self.save_pickle(metadata, f"metadata_{step}.pkl")
-            self.save_pickle(dataset, f"dataset_{step}.pkl")
+            # self.save_pickle(metadata, f"metadata_{step}.pkl")
+            # self.save_pickle(dataset, f"dataset_{step}.pkl")
             self.save_checkpoint(
-                checkpoint_state, f"{checkpoint_name}_{step}", checkpoint_gather_fns
+                checkpoint_state, f"{checkpoint_name}_{step}_{metadata['loss']}", checkpoint_gather_fns
             )
-        else:
+        # else:
             # Save a normal checkpoint that can be overwritten
-            self.save_pickle(metadata, "metadata.pkl")
-            self.save_pickle(dataset, "dataset.pkl")
-            self.save_checkpoint(
-                checkpoint_state, f"{checkpoint_name}", checkpoint_gather_fns
-            )
+            # self.save_pickle(metadata, "metadata.pkl")
+            # self.save_pickle(dataset, "dataset.pkl")
+            # self.save_checkpoint(
+            #     checkpoint_state, f"{checkpoint_name}", checkpoint_gather_fns
+            # )
 
     @staticmethod
     def load_checkpoint(path, target=None, shard_fns=None, remove_dict_prefix=None):
@@ -149,10 +155,25 @@ class StreamingCheckpointer(object):
     
     @staticmethod
     def load_safetensor_checkpoint(path, target=None, shard_fns=None):
+        params = safetensors.flax.load_file(path)
+        new_params = {}
+        for k in params:
+            if not "norm" in k and not "embed_tokens" in k:
+                new_params[k.replace("weight", "kernel")] = jnp.transpose(params[k].astype(jnp.bfloat16), (1, 0))
+            elif "embed_tokens" in k:
+                new_params[k.replace("weight", "embedding")] = params[k].astype(jnp.bfloat16)
+            else:
+                new_params[k] = params[k].astype(jnp.bfloat16)
+
+        state_dict = unflatten_dict(new_params, sep=".")
+        # state_dict = new_params
+        # print(state_dict)
+        
         if shard_fns is not None:
-            print("Warning: shard_fns is not supported for safetensors")
-        params = safetensors.safe_open(path, framework="flax")
-        return params
+            shard_fns = to_state_dict(shard_fns)
+            state_dict = tree_apply(shard_fns, state_dict)
+
+        return state_dict
 
     @classmethod
     def load_trainstate_checkpoint(
@@ -216,7 +237,7 @@ class StreamingCheckpointer(object):
             #     {'params': restored_params}
             # )
             restored_params = {"params": restored_params}
-        elif load_type == "safetensor":
+        elif load_type == "safetensors":
             restored_params = cls.load_safetensor_checkpoint(
                 path=load_path, target=params_target, shard_fns=params_shard_fns
             )

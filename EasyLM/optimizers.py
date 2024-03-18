@@ -129,7 +129,7 @@ class AdamWOptimizerFactory(object):
         config.b2 = 0.95
         config.clip_gradient = 1.0
         config.weight_decay = 1e-4
-        config.bf16_momentum = False
+        config.bf16_momentum = True # False
         config.multiply_by_parameter_scale = False
 
         if updates is not None:
